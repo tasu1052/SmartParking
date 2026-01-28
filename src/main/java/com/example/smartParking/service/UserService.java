@@ -36,4 +36,15 @@ public class UserService {
 
         return userRepository.save(user);
     }
+
+    public User login(String userId, String rawPassword){
+        User user = userRepository.findByUserId(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        if(!passwordEncoder.matches(rawPassword, user.getUserPassword())){
+            throw new IllegalArgumentException("Wrong password");
+        }
+
+        return user;
+    }
 }
