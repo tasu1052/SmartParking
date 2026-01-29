@@ -28,7 +28,11 @@ public class User {
 
     @Column(unique = true)
     private String email;
-    private String role;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private UserRole role;
+
     private int age;
 
     @CreationTimestamp

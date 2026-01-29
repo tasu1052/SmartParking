@@ -33,4 +33,8 @@ public class Reservation {
     @Column(nullable = false)
     private String carNumber;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ReservationStatus status;
+
 }

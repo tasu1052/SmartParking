@@ -2,6 +2,7 @@ package com.example.smartParking.service;
 
 import com.example.smartParking.dto.UserSignupDto;
 import com.example.smartParking.entity.User;
+import com.example.smartParking.entity.UserRole;
 import com.example.smartParking.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +33,7 @@ public class UserService {
         user.setEmail(dto.getEmail());
         user.setPhoneNumber(dto.getPhoneNumber());
         user.setAge(dto.getAge());
-        user.setRole("USER");
+        user.setRole(UserRole.USER);
 
         return userRepository.save(user);
     }
