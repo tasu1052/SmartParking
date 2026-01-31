@@ -54,7 +54,7 @@ public class ReservationService {
         Reservation reservation = reservationRepository.findById(reservationId)
                 .orElseThrow(() -> new IllegalArgumentException("예약이 존재하지 않습니다."));
 
-        if(!reservation.getUser().equals(loginUser.getUserId())){
+        if(reservation.getUser().getId() != loginUser.getId()){
             throw new IllegalArgumentException("본인의 예약만 취소할 수 있습니다.");
         }
 
