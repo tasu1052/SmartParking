@@ -7,9 +7,12 @@ import com.example.smartParking.entity.ReservationStatus;
 import com.example.smartParking.entity.User;
 import com.example.smartParking.repository.ParkingSpotRepository;
 import com.example.smartParking.repository.ReservationRepository;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -18,6 +21,7 @@ public class ReservationService {
     private final ReservationRepository reservationRepository;
     private final ParkingSpotRepository parkingSpotRepository;
 
+    //예약 생성 메서드
     public void createReservation(User user, ReservationCreateRequest request){
         ParkingSpot parkingSpot = parkingSpotRepository.findById(request.getParkingSpotId())
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 주차 공간입니다."));
@@ -32,8 +36,8 @@ public class ReservationService {
                 .existsByParkingSpotAndStatusAndStartTimeLessThanAndEndTimeGreaterThan(
                         parkingSpot,
                         ReservationStatus.RESERVED,
-                        request.getStartTime(),
-                        request.getEndTime()
+                        request.getEndTime(),
+                        request.getStartTime()
                 );
         if(exists){
             throw new IllegalArgumentException("이미 예약된 시간입니다.");
@@ -50,6 +54,7 @@ public class ReservationService {
         reservationRepository.save(reservation);
     }
 
+    //예약 취소 메서드
     public void cancelReservation(User loginUser, Long reservationId) {
         Reservation reservation = reservationRepository.findById(reservationId)
                 .orElseThrow(() -> new IllegalArgumentException("예약이 존재하지 않습니다."));
@@ -63,5 +68,20 @@ public class ReservationService {
         }
 
         reservation.setStatus(ReservationStatus.CANCELED);
+    }
+
+    //현재 예약 조회
+    @Transactional(readOnly = true)
+    public List<Reservation> getMyCurrentReservations(User user){
+        return reservationRepository.findByUserAndStatusAndEndTimeAfter(
+                user, ReservationStatus.RESERVED, LocalDateTime.now()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<Reservation> getMyPastReservations(User user){
+        return reservationRepository.findByUserAndEndTimeBefore(
+                user, LocalDateTime.now()
+        );
     }
 }

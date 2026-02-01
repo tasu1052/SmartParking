@@ -10,6 +10,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/reservations")
@@ -48,5 +50,29 @@ public class ReservationController {
         reservationService.cancelReservation(loginUser, reservationId);
 
         return ResponseEntity.ok("예약이 취소되었습니다.");
+    }
+
+    @GetMapping("/me/current")
+    public ResponseEntity<List<Reservation>> myCurrentReservations(HttpSession session){
+        User loginUser = (User) session.getAttribute("loginUser");
+
+        if(loginUser == null){
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .build();
+        }
+
+        return ResponseEntity.ok(reservationService.getMyCurrentReservations(loginUser));
+    }
+
+    @GetMapping("/me/history")
+    public ResponseEntity<List<Reservation>> myPastReservations(HttpSession session){
+        User loginUser = (User) session.getAttribute("loginUser");
+
+        if(loginUser == null){
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .build();
+        }
+
+        return ResponseEntity.ok(reservationService.getMyPastReservations(loginUser));
     }
 }

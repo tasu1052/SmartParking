@@ -20,4 +20,20 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
     List<Reservation> findByUser(User user);
 
     List<Reservation> findByParkingSpot(ParkingSpot parkingSpot);
+
+    List<Reservation> findByUserAndStatusAndEndTimeAfter(
+            User user,
+            ReservationStatus status,
+            LocalDateTime now
+    );
+
+    List<Reservation> findByUserAndEndTimeBefore(
+            User user,
+            LocalDateTime now
+    );
+
+    List<Reservation> findByStatusAndEndTimeBefore(
+            ReservationStatus status,
+            LocalDateTime time
+    );
 }
