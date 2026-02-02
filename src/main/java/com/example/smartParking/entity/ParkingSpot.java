@@ -20,5 +20,5 @@ public class ParkingSpot {
     private int spotNumber;
 
     @Column(nullable = false)
-    private boolean is_active;
+    private boolean active;
 }

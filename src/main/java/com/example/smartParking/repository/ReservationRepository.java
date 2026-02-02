@@ -5,6 +5,8 @@ import com.example.smartParking.entity.Reservation;
 import com.example.smartParking.entity.ReservationStatus;
 import com.example.smartParking.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -35,5 +37,15 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
     List<Reservation> findByStatusAndEndTimeBefore(
             ReservationStatus status,
             LocalDateTime time
+    );
+
+    @Query("""
+            SELECT r FROM Reservation r
+            JOIN FETCH r.user
+            JOIN FETCH r.parkingSpot
+            WHERE r.status = :status
+            """)
+    List<Reservation> findAllByStatus(
+            @Param("status") ReservationStatus status
     );
 }
