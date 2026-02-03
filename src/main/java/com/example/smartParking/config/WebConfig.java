@@ -1,5 +1,3 @@
-package com.example.smartParking.config;
-
 import com.example.smartParking.interceptor.AdminCheckInterceptor;
 import com.example.smartParking.interceptor.LoginCheckInterceptor;
 import lombok.RequiredArgsConstructor;
@@ -16,14 +14,17 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry){
 
-        //로그인 사용자만 접근 가능
+        // 로그인 사용자만 접근 가능 (API 전체 보호)
         registry.addInterceptor(loginCheckInterceptor)
-                .addPathPatterns("/reservations/**")
-                .excludePathPatterns("/auth/**");
+                .addPathPatterns("/api/**")
+                .excludePathPatterns(
+                        "/api/auth/login",
+                        "/api/auth/logout",// 로그인/로그아웃
+                        "/api/users/signup"     // 회원가입
+                );
 
-        //관리자만 접근 가능
+        // 관리자만 접근 가능
         registry.addInterceptor(adminCheckInterceptor)
-            .addPathPatterns("/admin/**");
-
+                .addPathPatterns("/api/admin/**");
     }
 }

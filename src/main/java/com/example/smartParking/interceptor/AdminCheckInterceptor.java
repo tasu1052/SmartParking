@@ -1,5 +1,6 @@
 package com.example.smartParking.interceptor;
 
+import com.example.smartParking.entity.UserRole;
 import com.example.smartParking.session.SessionConst;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -21,9 +22,8 @@ public class AdminCheckInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        String role = (String) session.getAttribute(SessionConst.LOGIN_ROLE);
-
-        if(!"ADMIN".equals(role)){
+        String role = (String) session.getAttribute(SessionConst.LOGIN_ROLE); // ✅ String
+        if (!"ADMIN".equals(role)) {
             response.setStatus(HttpStatus.FORBIDDEN.value());
             return false;
         }

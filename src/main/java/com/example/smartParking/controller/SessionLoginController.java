@@ -13,23 +13,28 @@ import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/auth")
+@RequestMapping("/api/auth")
 public class SessionLoginController {
     private final UserService userService;
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(
-            @RequestBody LoginRequestDto dto,
-            HttpSession session) {
-        User user = userService.login(dto.getUserId(), dto.getPassword());
+    public ResponseEntity<?> login(@RequestBody LoginRequestDto dto, HttpSession session) {
+        try {
+            User user = userService.login(dto.getUserId(), dto.getPassword());
 
-        session.setAttribute(SessionConst.LOGIN_USER_ID, user.getId());
-        session.setAttribute(SessionConst.LOGIN_ROLE, user.getRole());
+            session.setAttribute(SessionConst.LOGIN_USER_ID, user.getId());
+            session.setAttribute(SessionConst.LOGIN_ROLE, user.getRole().name()); // ✅ String 저장
 
-        return ResponseEntity.ok(Map.of(
-                        "message", "로그인 성공",
-                        "userId", user.getUserId(),
-                        "role", user.getRole()));
+            return ResponseEntity.ok(Map.of(
+                    "message", "로그인 성공",
+                    "userId", user.getUserId(),
+                    "role", user.getRole().name() // ✅ "USER"/"ADMIN"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(401).body(Map.of(
+                    "message", "아이디 또는 비밀번호가 올바르지 않습니다."
+            ));
+        }
     }
 
     @PostMapping("/logout")

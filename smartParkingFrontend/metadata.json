@@ -1,0 +1,5 @@
+{
+  "name": "Smart Parking Manager",
+  "description": "A comprehensive parking management system for users to reserve slots and admins to monitor parking status and user data.",
+  "requestFramePermissions": []
+}
