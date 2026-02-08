@@ -26,9 +26,12 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/api/users/signup",
-                                "/api/auth/login"
+                                "/api/auth/login",
+                                "/api/users/**",
+                                "/reservations/**",
+                                "/parking-lots/**"
                         ).permitAll()
-                        .anyRequest().authenticated()
+                        .anyRequest().permitAll()
                 );
 
         return http.build();

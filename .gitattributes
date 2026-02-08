@@ -7,3 +7,8 @@ application.properties
 application.yml
 application-*.properties
 application-*.yml
+
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf

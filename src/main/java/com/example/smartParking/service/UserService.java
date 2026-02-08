@@ -70,6 +70,7 @@ public class UserService {
     }
 
     //회원 정보 수정 메서드
+    @Transactional
     public void updateMyInfo(User loginUser, UserUpdateRequestDto requestDto){
         User user = userRepository.findById(loginUser.getId())
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));

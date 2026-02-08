@@ -43,6 +43,7 @@ public class SessionLoginController {
         return ResponseEntity.ok("로그아웃 성공");
     }
 
+    //현재 로그인 상태인지(권한 확인)
     @GetMapping("/me")
     public ResponseEntity<?> me(HttpSession session) {
         Long userId = (Long) session.getAttribute(SessionConst.LOGIN_USER_ID);
