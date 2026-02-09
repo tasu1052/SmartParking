@@ -1,3 +1,4 @@
+// src/types.ts
 
 export enum UserRole {
   USER = 'USER',
@@ -14,12 +15,11 @@ export interface User {
   email?: string;
 }
 
-export interface ParkingSlot {
-  id: number;
-  label: string;
-  isOccupied: boolean;
-  currentReservation?: Reservation;
-}
+/**
+ * ✅ 백엔드 ReservationStatus 기준으로 통일
+ * - RESERVED, CANCELED, COMPLETED
+ */
+export type ReservationStatus = 'RESERVED' | 'CANCELED' | 'COMPLETED';
 
 export interface Reservation {
   id: string;
@@ -29,5 +29,14 @@ export interface Reservation {
   carNumber: string;
   startTime: string;
   endTime: string;
-  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  status: ReservationStatus;
+  // 필요하면 durationHours 같은 필드도 여기 추가 가능
+  durationHours?: number;
+}
+
+export interface ParkingSlot {
+  id: number;
+  label: string;
+  isOccupied: boolean;
+  currentReservation?: Reservation;
 }

@@ -1,20 +1,22 @@
+// src/pages/UserDashboard.tsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { ParkingSlot, Reservation } from '../types';
+import { ParkingSlot, Reservation, ReservationStatus } from '../types';
 
 interface UserDashboardProps {
-  userId: string;
+  userId: string; // 화면 표시용(서버는 세션으로 유저 식별)
 }
 
-const PARKING_LOT_ID = 1; // ✅ 실제 주차장 id로 수정
+// ✅ 네가 만든 테스트 주차장 id가 3이면 3
+const PARKING_LOT_ID = 3;
 
-// ✅ ParkingSpotResponseDto에 맞춘 타입
+// ✅ ParkingSpotResponseDto 응답 타입
 type SpotApi = {
   id: number;
   spotNumber: number;
   available: boolean;
 };
 
-// ✅ Reservation 엔티티/DTO 응답은 프로젝트마다 달라서 유연하게
+// ✅ Reservation 엔티티 그대로 내려올 때(연관관계 포함)를 최대한 커버
 type ReservationApi = {
   id: number | string;
   carNumber?: string;
@@ -22,12 +24,19 @@ type ReservationApi = {
   endTime?: string;
   status?: string;
 
-  // spot 식별자 fallback
   parkingSpotId?: number;
-  parkingSpot?: { id: number };
+  parkingSpot?: { id: number; spotNumber?: number };
   spotId?: number;
   spot?: { id: number };
 };
+
+// ✅ 현재 예약은 RESERVED
+const CURRENT_STATUS: ReservationStatus = 'RESERVED';
+
+function normalizeStatus(s?: string): ReservationStatus {
+  if (s === 'RESERVED' || s === 'CANCELED' || s === 'COMPLETED') return s;
+  return 'RESERVED';
+}
 
 function calcDurationHours(startISO?: string, endISO?: string) {
   if (!startISO || !endISO) return 0;
@@ -36,10 +45,16 @@ function calcDurationHours(startISO?: string, endISO?: string) {
   return Math.round(diff / (1000 * 60 * 60));
 }
 
-// ✅ LocalDateTime 안전 포맷: "YYYY-MM-DDTHH:mm" → "YYYY-MM-DDTHH:mm:00"
+// ✅ datetime-local("YYYY-MM-DDTHH:mm") -> LocalDateTime("YYYY-MM-DDTHH:mm:00")
 function toLocalDateTimeString(dtLocal: string) {
   if (!dtLocal) return dtLocal;
   return dtLocal.length === 16 ? `${dtLocal}:00` : dtLocal;
+}
+
+function formatLocalInput(date: Date) {
+  // datetime-local에 넣기 위한 "YYYY-MM-DDTHH:mm"
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
 const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
@@ -68,14 +83,17 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
         return;
       }
 
-      // ✅ Spot DTO 매핑 수정 (available → isOccupied 반전)
+      // 1) spots
       const spotJson: SpotApi[] = await spotsRes.json();
-      const mappedSlots: ParkingSlot[] = spotJson.map(s => ({
-        id: s.id,
-        label: `S${s.spotNumber}`,
-        isOccupied: !s.available,
-      }));
+      const mappedSlots: ParkingSlot[] = spotJson
+        .sort((a, b) => a.spotNumber - b.spotNumber)
+        .map(s => ({
+          id: s.id,
+          label: `S${s.spotNumber}`,
+          isOccupied: !s.available,
+        }));
 
+      // 2) reservations (현재 예약)
       let mappedReservations: Reservation[] = [];
 
       if (curRes.ok) {
@@ -91,6 +109,7 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
 
           const startISO = r.startTime ?? '';
           const endISO = r.endTime ?? '';
+          const status = normalizeStatus(r.status);
 
           return {
             id: String(r.id),
@@ -100,19 +119,20 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
             carNumber: r.carNumber ?? '',
             startTime: startISO,
             endTime: endISO,
-            status: (r.status as any) ?? 'ACTIVE',
+            status,
             durationHours: calcDurationHours(startISO, endISO),
           };
         });
 
-        // ✅ current ACTIVE 예약 기준으로 슬롯 점유 보정(서버 반영 지연 대비)
-        const activeSet = new Set(mappedReservations.filter(r => r.status === 'ACTIVE').map(r => r.slotId));
-        setSlots(mappedSlots.map(s => ({ ...s, isOccupied: s.isOccupied || activeSet.has(s.id) })));
-      } else if (curRes.status !== 401) {
-        const msg = await curRes.text().catch(() => '내 예약 조회 실패');
-        console.warn(msg);
-        setSlots(mappedSlots);
+        // ✅ 서버 spot available 계산이 혹시 늦게 반영될 수 있으니,
+        // 현재 예약(RESERVED)인 spot은 강제로 점유 처리
+        const reservedSet = new Set(
+          mappedReservations.filter(r => r.status === CURRENT_STATUS).map(r => r.slotId)
+        );
+
+        setSlots(mappedSlots.map(s => ({ ...s, isOccupied: s.isOccupied || reservedSet.has(s.id) })));
       } else {
+        // 401이면 로그인 안 된 상태거나, 오류면 spots만 보여줌
         setSlots(mappedSlots);
       }
 
@@ -128,18 +148,22 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
     refresh();
   }, []);
 
+  // 슬롯 선택 시 기본 시간 자동 세팅
   useEffect(() => {
-    if (selectedSlot) {
-      const now = new Date();
-      const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
-      const formatLocal = (date: Date) => {
-        const offset = date.getTimezoneOffset() * 60000;
-        return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-      };
-      setStartTime(formatLocal(now));
-      setEndTime(formatLocal(inOneHour));
-    }
+    if (!selectedSlot) return;
+    const now = new Date();
+    const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
+    setStartTime(formatLocalInput(now));
+    setEndTime(formatLocalInput(inOneHour));
   }, [selectedSlot]);
+
+  const slotsRow1 = slots.slice(0, 10);
+  const slotsRow2 = slots.slice(10, 20);
+
+  const myCurrentReservations = useMemo(
+    () => reservations.filter(r => r.status === CURRENT_STATUS),
+    [reservations]
+  );
 
   const handleSlotClick = (slot: ParkingSlot) => {
     if (slot.isOccupied) {
@@ -166,14 +190,13 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
     }
 
     try {
-      // ✅ ReservationCreateRequest 정확히 맞춤
       const res = await fetch('/reservations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           parkingSpotId: selectedSlot.id,
-          carNumber,
+          carNumber: carNumber.trim(),
           startTime: toLocalDateTimeString(startTime),
           endTime: toLocalDateTimeString(endTime),
         }),
@@ -216,14 +239,6 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
     }
   };
 
-  const myActiveReservations = useMemo(
-    () => reservations.filter(r => r.userId === userId && r.status === 'ACTIVE'),
-    [reservations, userId]
-  );
-
-  const slotsRow1 = slots.slice(0, 10);
-  const slotsRow2 = slots.slice(10, 20);
-
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto p-10">
@@ -240,11 +255,11 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
         <h1 className="text-4xl font-black text-slate-900 tracking-tighter">주차 공간 작도</h1>
         <p className="text-slate-400 mt-2 font-medium">실시간 주차면 현황을 확인하고 예약하세요.</p>
 
-        {myActiveReservations.length > 0 && (
+        {myCurrentReservations.length > 0 && (
           <div className="mt-6 bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
             <p className="text-sm font-black text-slate-700 mb-3">현재 이용 중인 예약</p>
             <div className="flex flex-col gap-2">
-              {myActiveReservations.map(r => (
+              {myCurrentReservations.map(r => (
                 <div key={r.id} className="flex items-center justify-between bg-slate-50 rounded-2xl px-4 py-3">
                   <div className="text-sm font-bold text-slate-700">
                     Spot {r.slotId} · {r.carNumber}
@@ -262,19 +277,19 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
         )}
       </header>
 
-      {/* 이하 UI는 네 기존 코드 그대로 유지 */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-10">
+        {/* ===== 왼쪽: 작도 ===== */}
         <div className="lg:col-span-3">
           <div className="bg-white rounded-[2.5rem] shadow-2xl p-10 border border-slate-50 relative overflow-hidden">
             <div className="flex justify-between items-center mb-12">
               <div className="flex gap-8">
                 <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full bg-green-500 shadow-lg shadow-green-100"></div>
+                  <div className="w-4 h-4 rounded-full bg-green-500 shadow-lg shadow-green-100" />
                   <span className="text-xs font-bold text-slate-500">예약 가능 (🟢)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full bg-red-500 shadow-lg shadow-red-100"></div>
-                  <span className="text-xs font-bold text-slate-500">주차 중 (🔴)</span>
+                  <div className="w-4 h-4 rounded-full bg-red-500 shadow-lg shadow-red-100" />
+                  <span className="text-xs font-bold text-slate-500">예약 불가 (🔴)</span>
                 </div>
               </div>
               <button
@@ -286,66 +301,84 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
               </button>
             </div>
 
-            <div className="bg-slate-50 rounded-[2rem] p-10 border-4 border-slate-100 flex flex-col gap-12 relative">
-              <div className="grid grid-cols-5 gap-6">
-                {slotsRow1.map(slot => (
-                  <button
-                    key={slot.id}
-                    onClick={() => handleSlotClick(slot)}
-                    className={`
-                      aspect-[3/4] rounded-xl border-2 flex flex-col items-center justify-center transition-all group relative
-                      ${slot.isOccupied
-                        ? 'bg-white border-red-400 text-red-500 cursor-not-allowed shadow-sm'
-                        : 'bg-white border-green-400 text-green-600 hover:scale-105 hover:shadow-xl hover:shadow-green-100 shadow-md'
-                      }
-                      ${selectedSlot?.id === slot.id ? 'ring-8 ring-blue-50 border-blue-600 !scale-110 z-10' : ''}
-                    `}
-                  >
-                    <span className="absolute top-2 left-2 text-[9px] font-black opacity-30">{slot.label}</span>
-                    <i className={`fas ${slot.isOccupied ? 'fa-car' : 'fa-parking'} text-3xl mb-1`}></i>
-                    <span className="text-[10px] font-black">{slot.isOccupied ? 'BUSY' : 'FREE'}</span>
-                  </button>
-                ))}
+            {/* ✅ slots가 비어있으면 안내 */}
+            {slots.length === 0 ? (
+              <div className="bg-slate-50 rounded-2xl p-10 border border-slate-100 text-center">
+                <p className="text-slate-500 font-bold">주차면 데이터가 없습니다.</p>
+                <p className="text-slate-400 text-sm mt-2">
+                  DB에 parking_spot이 생성되어 있는지, PARKING_LOT_ID가 맞는지 확인해 주세요.
+                </p>
               </div>
+            ) : (
+              <div className="bg-slate-50 rounded-[2rem] p-10 border-4 border-slate-100 flex flex-col gap-12 relative">
+                {/* 윗줄 10칸 */}
+                <div className="grid grid-cols-5 gap-6">
+                  {slotsRow1.map(slot => (
+                    <button
+                      key={slot.id}
+                      onClick={() => handleSlotClick(slot)}
+                      className={`
+                        aspect-[3/4] rounded-xl border-2 flex flex-col items-center justify-center transition-all relative
+                        ${slot.isOccupied
+                          ? 'bg-white border-red-400 text-red-500 cursor-not-allowed shadow-sm'
+                          : 'bg-white border-green-400 text-green-600 hover:scale-105 hover:shadow-xl hover:shadow-green-100 shadow-md'
+                        }
+                        ${selectedSlot?.id === slot.id ? 'ring-8 ring-blue-50 border-blue-600 !scale-110 z-10' : ''}
+                      `}
+                    >
+                      <span className="absolute top-2 left-2 text-[9px] font-black opacity-30">{slot.label}</span>
+                      <div className="text-3xl mb-1">{slot.isOccupied ? '🚗' : '🅿️'}</div>
+                      <span className="text-[10px] font-black">{slot.isOccupied ? 'BUSY' : 'FREE'}</span>
+                    </button>
+                  ))}
+                </div>
 
-              <div className="h-20 bg-slate-200/50 rounded-2xl flex items-center justify-center border-y-4 border-dashed border-slate-300">
-                <span className="text-xs font-black text-slate-400 uppercase tracking-[1.5em] opacity-50 pl-6">Main Aisle</span>
-              </div>
+                {/* 가운데 통로 */}
+                <div className="h-20 bg-slate-200/50 rounded-2xl flex items-center justify-center border-y-4 border-dashed border-slate-300">
+                  <span className="text-xs font-black text-slate-400 uppercase tracking-[1.2em] opacity-50 pl-6">
+                    Main Aisle
+                  </span>
+                </div>
 
-              <div className="grid grid-cols-5 gap-6">
-                {slotsRow2.map(slot => (
-                  <button
-                    key={slot.id}
-                    onClick={() => handleSlotClick(slot)}
-                    className={`
-                      aspect-[3/4] rounded-xl border-2 flex flex-col items-center justify-center transition-all group relative
-                      ${slot.isOccupied
-                        ? 'bg-white border-red-400 text-red-500 cursor-not-allowed shadow-sm'
-                        : 'bg-white border-green-400 text-green-600 hover:scale-105 hover:shadow-xl hover:shadow-green-100 shadow-md'
-                      }
-                      ${selectedSlot?.id === slot.id ? 'ring-8 ring-blue-50 border-blue-600 !scale-110 z-10' : ''}
-                    `}
-                  >
-                    <i className={`fas ${slot.isOccupied ? 'fa-car' : 'fa-parking'} text-3xl mb-1`}></i>
-                    <span className="text-[10px] font-black">{slot.isOccupied ? 'BUSY' : 'FREE'}</span>
-                    <span className="absolute bottom-2 left-2 text-[9px] font-black opacity-30">{slot.label}</span>
-                  </button>
-                ))}
-              </div>
+                {/* 아랫줄 10칸 */}
+                <div className="grid grid-cols-5 gap-6">
+                  {slotsRow2.map(slot => (
+                    <button
+                      key={slot.id}
+                      onClick={() => handleSlotClick(slot)}
+                      className={`
+                        aspect-[3/4] rounded-xl border-2 flex flex-col items-center justify-center transition-all relative
+                        ${slot.isOccupied
+                          ? 'bg-white border-red-400 text-red-500 cursor-not-allowed shadow-sm'
+                          : 'bg-white border-green-400 text-green-600 hover:scale-105 hover:shadow-xl hover:shadow-green-100 shadow-md'
+                        }
+                        ${selectedSlot?.id === slot.id ? 'ring-8 ring-blue-50 border-blue-600 !scale-110 z-10' : ''}
+                      `}
+                    >
+                      <div className="text-3xl mb-1">{slot.isOccupied ? '🚗' : '🅿️'}</div>
+                      <span className="text-[10px] font-black">{slot.isOccupied ? 'BUSY' : 'FREE'}</span>
+                      <span className="absolute bottom-2 left-2 text-[9px] font-black opacity-30">{slot.label}</span>
+                    </button>
+                  ))}
+                </div>
 
-              <div className="absolute inset-0 pointer-events-none opacity-[0.03] grid grid-cols-12 grid-rows-12">
-                {Array.from({ length: 144 }).map((_, i) => (
-                  <div key={i} className="border border-slate-900"></div>
-                ))}
+                {/* 그리드 배경 느낌 */}
+                <div className="absolute inset-0 pointer-events-none opacity-[0.03] grid grid-cols-12 grid-rows-12">
+                  {Array.from({ length: 144 }).map((_, i) => (
+                    <div key={i} className="border border-slate-900" />
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
+        {/* ===== 오른쪽: 예약 패널 ===== */}
         <div className="lg:col-span-1">
           {selectedSlot ? (
-            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 border-t-8 border-blue-600 sticky top-24 animate-fadeIn">
+            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 border-t-8 border-blue-600 sticky top-24">
               <h3 className="text-xl font-black text-slate-900 mb-6 tracking-tight">주차 예약 등록</h3>
+
               <div className="space-y-6">
                 <div className="bg-blue-50 px-5 py-4 rounded-2xl border border-blue-100">
                   <p className="text-[10px] font-black text-blue-400 uppercase">선택 구역</p>
@@ -353,11 +386,13 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 ml-1">차량 번호</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 ml-1">
+                    차량 번호
+                  </label>
                   <input
                     type="text"
                     className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-lg focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    placeholder="12가 3456"
+                    placeholder="12가3456"
                     value={carNumber}
                     onChange={e => setCarNumber(e.target.value)}
                   />
@@ -365,7 +400,9 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
 
                 <div className="grid gap-4">
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 ml-1">입차 시간</label>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 ml-1">
+                      입차 시간
+                    </label>
                     <input
                       type="datetime-local"
                       className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl outline-none text-sm font-bold"
@@ -374,7 +411,9 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 ml-1">출차 예정</label>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 ml-1">
+                      출차 예정
+                    </label>
                     <input
                       type="datetime-local"
                       className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl outline-none text-sm font-bold"
@@ -393,10 +432,8 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
                   </button>
                   <button
                     onClick={() => {
-                      if (window.confirm('정말 취소하시겠습니까?')) {
-                        setSelectedSlot(null);
-                        setCarNumber('');
-                      }
+                      setSelectedSlot(null);
+                      setCarNumber('');
                     }}
                     className="w-full py-3 text-slate-400 font-bold hover:text-red-500 transition-colors"
                   >
@@ -408,7 +445,7 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
           ) : (
             <div className="bg-white rounded-[2.5rem] border-4 border-dashed border-slate-100 p-10 flex flex-col items-center justify-center text-center h-[500px]">
               <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6 animate-pulse">
-                <i className="fas fa-arrow-left text-3xl text-slate-300"></i>
+                <span className="text-3xl text-slate-300">⬅️</span>
               </div>
               <h4 className="text-lg font-black text-slate-800">구역을 선택하세요</h4>
               <p className="text-sm text-slate-400 mt-2 font-medium leading-relaxed">
@@ -422,9 +459,9 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
 
       {showSuccessModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-md">
-          <div className="bg-white rounded-[2.5rem] max-w-sm w-full p-10 shadow-2xl text-center animate-scaleIn">
+          <div className="bg-white rounded-[2.5rem] max-w-sm w-full p-10 shadow-2xl text-center">
             <div className="w-20 h-20 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
-              <i className="fas fa-check text-4xl"></i>
+              <span className="text-4xl">✅</span>
             </div>
             <h3 className="text-2xl font-black text-slate-900 mb-2">예약되었습니다</h3>
             <p className="text-slate-400 font-medium mb-10 text-sm">
