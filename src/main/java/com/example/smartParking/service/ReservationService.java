@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -59,11 +60,11 @@ public class ReservationService {
         Reservation reservation = reservationRepository.findById(reservationId)
                 .orElseThrow(() -> new IllegalArgumentException("예약이 존재하지 않습니다."));
 
-        if(reservation.getUser().getId() != loginUser.getId()){
+        if (!Objects.equals(reservation.getUser().getId(), loginUser.getId())) {
             throw new IllegalArgumentException("본인의 예약만 취소할 수 있습니다.");
         }
 
-        if(reservation.getStatus() != ReservationStatus.RESERVED){
+        if (reservation.getStatus() != ReservationStatus.RESERVED) {
             throw new IllegalStateException("이미 취소되었거나 완료된 예약입니다.");
         }
 
@@ -73,14 +74,14 @@ public class ReservationService {
     //현재 예약 조회
     @Transactional(readOnly = true)
     public List<Reservation> getMyCurrentReservations(User user){
-        return reservationRepository.findByUserAndStatusAndEndTimeAfter(
+        return reservationRepository.findMyCurrentWithSpotLot(
                 user, ReservationStatus.RESERVED, LocalDateTime.now()
         );
     }
 
     @Transactional(readOnly = true)
     public List<Reservation> getMyPastReservations(User user){
-        return reservationRepository.findByUserAndEndTimeBefore(
+        return reservationRepository.findMyHistoryWithSpotLot(
                 user, LocalDateTime.now()
         );
     }

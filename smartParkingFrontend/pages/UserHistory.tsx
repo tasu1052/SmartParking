@@ -6,6 +6,7 @@ interface UserHistoryProps {
   userId: string; // 화면 표시용 (서버는 세션으로 유저 식별)
 }
 
+// ✅ 이제 백엔드가 ReservationResponseDto로 내려줌
 type ReservationApi = {
   id: number | string;
   carNumber?: string;
@@ -14,22 +15,20 @@ type ReservationApi = {
   status?: string;
 
   parkingSpotId?: number;
-  parkingSpot?: { id: number };
-  spotId?: number;
-  spot?: { id: number };
+  spotNumber?: number;
+  parkingLotId?: number;
+  parkingLotName?: string;
 };
 
 function normalizeStatus(s?: string): ReservationStatus {
   if (s === 'RESERVED' || s === 'CANCELED' || s === 'COMPLETED') return s;
-  // status가 없거나 이상하면 RESERVED로 간주(현재 예약 안 보이는 상황 대비)
   return 'RESERVED';
 }
 
-// 백엔드 LocalDateTime이 "YYYY-MM-DD HH:mm:ss"면 Date 파싱이 깨질 수 있어서 보정
 function normalizeIsoLike(dt?: string) {
   if (!dt) return '';
   if (dt.includes('T')) return dt;
-  if (dt.includes(' ')) return dt.replace(' ', 'T'); // "2026-02-09 12:21:00" -> "2026-02-09T12:21:00"
+  if (dt.includes(' ')) return dt.replace(' ', 'T');
   return dt;
 }
 
@@ -59,7 +58,6 @@ function formatKoreanDateTime(iso?: string) {
   });
 }
 
-// 지금 이용중 판정(현재시간이 start~end 사이)
 function isInUseNow(startISO?: string, endISO?: string) {
   const s = toMillis(startISO);
   const e = toMillis(endISO);
@@ -68,8 +66,11 @@ function isInUseNow(startISO?: string, endISO?: string) {
   return s <= now && now <= e;
 }
 
-function badgeForCurrent() {
-  return { label: '이용중', cls: 'bg-green-50 text-green-700 border-green-100' };
+function badgeForCurrentByTime(startISO?: string, endISO?: string) {
+  if (isInUseNow(startISO, endISO)) {
+    return { label: '이용중', cls: 'bg-green-50 text-green-700 border-green-100' };
+  }
+  return { label: '예약중', cls: 'bg-blue-50 text-blue-700 border-blue-100' };
 }
 
 function badgeForHistory(status: ReservationStatus) {
@@ -77,11 +78,24 @@ function badgeForHistory(status: ReservationStatus) {
     case 'CANCELED':
       return { label: '취소됨', cls: 'bg-red-50 text-red-700 border-red-100' };
     case 'RESERVED':
-      // 혹시 history에도 RESERVED가 섞여오면 표시만 "예약중"으로
       return { label: '예약중', cls: 'bg-blue-50 text-blue-700 border-blue-100' };
     case 'COMPLETED':
     default:
       return { label: '이용완료', cls: 'bg-slate-50 text-slate-700 border-slate-100' };
+  }
+}
+
+async function readErrorMessage(res: Response, fallback: string) {
+  const ct = res.headers.get('content-type') || '';
+  try {
+    if (ct.includes('application/json')) {
+      const j = await res.json();
+      return j.message || j.error || fallback;
+    }
+    const t = await res.text();
+    return t || fallback;
+  } catch {
+    return fallback;
   }
 }
 
@@ -91,7 +105,8 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
   const [loading, setLoading] = useState(true);
 
   const mapOne = (r: ReservationApi): Reservation => {
-    const slotId = r.parkingSpotId ?? r.parkingSpot?.id ?? r.spotId ?? r.spot?.id ?? 0;
+    // ✅ Spot 번호는 DTO의 spotNumber로 표시
+    const slotId = r.spotNumber ?? 0;
 
     const startISO = normalizeIsoLike(r.startTime ?? '');
     const endISO = normalizeIsoLike(r.endTime ?? '');
@@ -99,7 +114,7 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
 
     return {
       id: String(r.id),
-      userId,
+      userId, // props 유지
       userName: '',
       slotId,
       carNumber: r.carNumber ?? '',
@@ -110,6 +125,9 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
     };
   };
 
+  // key 중복 방지
+  const reactKey = (r: Reservation, idx: number) => `${r.id}-${r.slotId}-${r.startTime}-${idx}`;
+
   const loadAll = async () => {
     setLoading(true);
     try {
@@ -119,13 +137,11 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
       ]);
 
       if (!curRes.ok && curRes.status !== 401) {
-        const msg = await curRes.text().catch(() => '현재 예약 조회 실패');
-        alert(msg);
+        alert(await readErrorMessage(curRes, '현재 예약 조회 실패'));
         return;
       }
       if (!hisRes.ok && hisRes.status !== 401) {
-        const msg = await hisRes.text().catch(() => '예약 이력 조회 실패');
-        alert(msg);
+        alert(await readErrorMessage(hisRes, '예약 이력 조회 실패'));
         return;
       }
 
@@ -135,22 +151,19 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
       const curMapped = curJson.map(mapOne);
       const hisMapped = hisJson.map(mapOne);
 
-      // ✅ "현재 예약 내역"은 기본적으로 /me/current(= RESERVED) 기반
-      // 다만 혹시 백엔드가 상태를 RESERVED 대신 다른 값으로 내려주거나,
-      // 시간이 겹치는 걸 현재로 보여주고 싶으면 inUseNow로 보강
-      const computedCurrent = curMapped
+      // 현재 예약: RESERVED 또는 시간상 이용중
+      const currentAll = curMapped
         .filter(r => r.status !== 'CANCELED' && (r.status === 'RESERVED' || isInUseNow(r.startTime, r.endTime)))
         .sort((a, b) => toMillis(b.startTime) - toMillis(a.startTime));
 
-      // ✅ fallback: /me/current가 비어 있으면 history에서 현재로 보일만한 것 끌어오기
-      const fallbackFromHistory = hisMapped
-        .filter(r => r.status !== 'CANCELED' && (r.status === 'RESERVED' || isInUseNow(r.startTime, r.endTime)))
+      // 과거 예약: current id 제외
+      const currentIds = new Set(currentAll.map(r => r.id));
+      const historyOnly = hisMapped
+        .filter(r => !currentIds.has(r.id))
         .sort((a, b) => toMillis(b.startTime) - toMillis(a.startTime));
 
-      setCurrent(computedCurrent.length > 0 ? computedCurrent : fallbackFromHistory);
-
-      // 과거 예약 이력(정렬)
-      setHistory(hisMapped.sort((a, b) => toMillis(b.startTime) - toMillis(a.startTime)));
+      setCurrent(currentAll);
+      setHistory(historyOnly);
     } catch {
       alert('서버와 통신할 수 없습니다.');
     } finally {
@@ -166,14 +179,13 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
     if (!window.confirm('정말 예약을 취소하시겠습니까?')) return;
 
     try {
-      const res = await fetch(`/reservations/${reservationId}`, {
+      const res = await fetch(`/reservations/${encodeURIComponent(reservationId)}`, {
         method: 'DELETE',
         credentials: 'include',
       });
 
       if (!res.ok) {
-        const msg = await res.text().catch(() => '예약 취소 실패');
-        alert(msg);
+        alert(await readErrorMessage(res, '예약 취소 실패'));
         return;
       }
 
@@ -184,8 +196,9 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
     }
   };
 
-  const myCurrent = useMemo(() => current.filter(r => r.userId === userId), [current, userId]);
-  const myHistory = useMemo(() => history.filter(r => r.userId === userId), [history, userId]);
+  // /me/* 는 세션 유저 기준이라 필터링 불필요
+  const myCurrent = useMemo(() => current, [current]);
+  const myHistory = useMemo(() => history, [history]);
 
   if (loading) {
     return (
@@ -214,7 +227,6 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
         </div>
       </header>
 
-      {/* 현재 예약 내역 */}
       <section className="mb-10">
         <div className="flex items-end justify-between mb-3">
           <h2 className="text-xl font-black text-slate-800">현재 예약 내역</h2>
@@ -227,10 +239,10 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
           </div>
         ) : (
           <div className="grid gap-4">
-            {myCurrent.map(r => {
-              const badge = badgeForCurrent(); // 현재 예약은 무조건 "이용중"으로 표시
+            {myCurrent.map((r, idx) => {
+              const badge = badgeForCurrentByTime(r.startTime, r.endTime);
               return (
-                <div key={r.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                <div key={reactKey(r, idx)} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2">
@@ -252,7 +264,6 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
                       </div>
                     </div>
 
-                    {/* ✅ 현재 예약 취소 버튼 */}
                     <button
                       onClick={() => onCancel(r.id)}
                       className="px-5 py-3 rounded-xl bg-red-50 text-red-600 font-black text-sm hover:bg-red-600 hover:text-white transition"
@@ -267,7 +278,6 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
         )}
       </section>
 
-      {/* 과거 예약 이력 */}
       <section>
         <div className="flex items-end justify-between mb-3">
           <h2 className="text-xl font-black text-slate-800">과거 예약 이력</h2>
@@ -280,10 +290,10 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
           </div>
         ) : (
           <div className="grid gap-4">
-            {myHistory.map(r => {
+            {myHistory.map((r, idx) => {
               const badge = badgeForHistory(r.status);
               return (
-                <div key={r.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                <div key={reactKey(r, idx)} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2">
@@ -304,8 +314,6 @@ const UserHistory: React.FC<UserHistoryProps> = ({ userId }) => {
                         )}
                       </div>
                     </div>
-
-                    {/* 과거 이력은 취소 버튼 없음 */}
                   </div>
                 </div>
               );

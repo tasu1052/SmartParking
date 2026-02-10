@@ -1,6 +1,7 @@
 package com.example.smartParking.controller;
 
 import com.example.smartParking.dto.ReservationCreateRequest;
+import com.example.smartParking.dto.ReservationResponseDto;
 import com.example.smartParking.entity.Reservation;
 import com.example.smartParking.entity.User;
 import com.example.smartParking.service.ReservationService;
@@ -51,25 +52,43 @@ public class ReservationController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
         }
 
-        reservationService.cancelReservation(loginUser, reservationId);
-        return ResponseEntity.ok("예약이 취소되었습니다.");
+        try {
+            reservationService.cancelReservation(loginUser, reservationId);
+            return ResponseEntity.ok("예약이 취소되었습니다.");
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
+        }
     }
 
     @GetMapping("/me/current")
-    public ResponseEntity<List<Reservation>> myCurrentReservations(HttpSession session){
+    public ResponseEntity<List<ReservationResponseDto>> myCurrentReservations(HttpSession session){
         User loginUser = getLoginUser(session);
         if(loginUser == null){
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        return ResponseEntity.ok(reservationService.getMyCurrentReservations(loginUser));
+
+        List<ReservationResponseDto> res = reservationService.getMyCurrentReservations(loginUser)
+                .stream()
+                .map(ReservationResponseDto::from)
+                .toList();
+
+        return ResponseEntity.ok(res);
     }
 
     @GetMapping("/me/history")
-    public ResponseEntity<List<Reservation>> myPastReservations(HttpSession session){
+    public ResponseEntity<List<ReservationResponseDto>> myPastReservations(HttpSession session){
         User loginUser = getLoginUser(session);
         if(loginUser == null){
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        return ResponseEntity.ok(reservationService.getMyPastReservations(loginUser));
+
+        List<ReservationResponseDto> res = reservationService.getMyPastReservations(loginUser)
+                .stream()
+                .map(ReservationResponseDto::from)
+                .toList();
+
+        return ResponseEntity.ok(res);
     }
 }

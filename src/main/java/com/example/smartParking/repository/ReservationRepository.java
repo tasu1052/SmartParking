@@ -23,16 +23,16 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 
     List<Reservation> findByParkingSpot(ParkingSpot parkingSpot);
 
-    List<Reservation> findByUserAndStatusAndEndTimeAfter(
-            User user,
-            ReservationStatus status,
-            LocalDateTime now
-    );
-
-    List<Reservation> findByUserAndEndTimeBefore(
-            User user,
-            LocalDateTime now
-    );
+//    List<Reservation> findByUserAndStatusAndEndTimeAfter(
+//            User user,
+//            ReservationStatus status,
+//            LocalDateTime now
+//    );
+//
+////    List<Reservation> findByUserAndEndTimeBefore(
+////            User user,
+////            LocalDateTime now
+////    );
 
     List<Reservation> findByStatusAndEndTimeBefore(
             ReservationStatus status,
@@ -47,5 +47,33 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             """)
     List<Reservation> findAllByStatus(
             @Param("status") ReservationStatus status
+    );
+
+    @Query("""
+    SELECT r FROM Reservation r
+    JOIN FETCH r.parkingSpot ps
+    JOIN FETCH ps.parkingLot pl
+    WHERE r.user = :user
+      AND r.status = :status
+      AND r.endTime > :now
+    ORDER BY r.startTime DESC
+""")
+    List<Reservation> findMyCurrentWithSpotLot(
+            @Param("user") User user,
+            @Param("status") ReservationStatus status,
+            @Param("now") LocalDateTime now
+    );
+
+    @Query("""
+    SELECT r FROM Reservation r
+    JOIN FETCH r.parkingSpot ps
+    JOIN FETCH ps.parkingLot pl
+    WHERE r.user = :user
+      AND r.endTime < :now
+    ORDER BY r.startTime DESC
+""")
+    List<Reservation> findMyHistoryWithSpotLot(
+            @Param("user") User user,
+            @Param("now") LocalDateTime now
     );
 }
