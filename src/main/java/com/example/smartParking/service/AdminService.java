@@ -40,7 +40,8 @@ public class AdminService {
                         user.getUserName(),
                         user.getAge(),
                         user.getEmail(),
-                        user.getPhoneNumber()
+                        user.getPhoneNumber(),
+                        user.getRole()
                 ))
                 .toList();
     }

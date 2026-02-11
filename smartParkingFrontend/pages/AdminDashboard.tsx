@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 
 type AdminParkingStatusResponseDto = {
@@ -16,9 +16,8 @@ type AdminUserResponseDto = {
   email?: string | null;
   phoneNumber?: string | null;
 
-  // ✅ 현재 백엔드 DTO에는 role이 없음.
-  // role까지 내려주면 USER만 필터 가능해짐.
-  role?: 'USER' | 'ADMIN';
+
+  role: 'USER' | 'ADMIN';
 };
 
 function normalizeIsoLike(dt?: string) {
@@ -69,6 +68,8 @@ const AdminDashboard: React.FC = () => {
   const [users, setUsers] = useState<AdminUserResponseDto[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const redirectedRef = useRef(false);
+
   const loadAll = async () => {
     setLoading(true);
     try {
@@ -76,6 +77,22 @@ const AdminDashboard: React.FC = () => {
         fetch('/admin/parking', { credentials: 'include' }),
         fetch('/admin/users', { credentials: 'include' }),
       ]);
+
+      // ✅ 로그아웃(세션 만료) 처리
+    if (pRes.status === 401 || uRes.status === 401) {
+      if (!redirectedRef.current) {
+        redirectedRef.current = true;
+        window.location.replace('/login'); // replace: 뒤로가기 시 admin으로 안 돌아오게
+  }
+      return;
+    }
+
+    // ✅ 권한 없음(관리자 아님)
+    if (pRes.status === 403 || uRes.status === 403) {
+      alert('관리자 권한이 없습니다.');
+      window.location.href = '/'; // 또는 접근 불가 페이지
+      return;
+    }
 
       if (!pRes.ok) {
         const msg = await readErrorMessage(pRes, '주차장 현황 조회 실패');
@@ -93,11 +110,18 @@ const AdminDashboard: React.FC = () => {
 
       setParkingStatus(Array.isArray(pJson) ? pJson : []);
       setUsers(Array.isArray(uJson) ? uJson : []);
-    } catch {
+    } catch (e: any) {
+      // ✅ 이미 로그인 화면으로 보내는 중이면 fetch 에러(alert) 무시
+      if (redirectedRef.current) return;
+
+      // ✅ 페이지 이동/언마운트로 fetch가 취소되며 나는 AbortError도 무시 가능
+      if (e?.name === 'AbortError') return;
+
       alert('서버와 통신할 수 없습니다.');
     } finally {
-      setLoading(false);
-    }
+      // ✅ 리다이렉트 중이면 굳이 setLoading 하지 않아도 됨(경고 방지)
+      if (!redirectedRef.current) setLoading(false);
+    } 
   };
 
   useEffect(() => {
@@ -129,13 +153,19 @@ const AdminDashboard: React.FC = () => {
     });
   }, [reservationBySpotNumber]);
 
-  // ✅ 회원관리에서 USER만 보여주고 싶다면 role이 필요함.
-  // 현재 DTO에 role이 없으니, role이 내려오는 경우에만 필터하도록 처리.
   const managedUsers = useMemo(() => {
-    const hasRole = users.some(u => u.role);
-    if (!hasRole) return users; // role이 없으면 전체 표시(백엔드 수정 필요)
-    return users.filter(u => u.role === 'USER');
-  }, [users]);
+  // ADMIN 먼저, 그 다음 USER (그 외는 뒤로)
+  const rank = (r: AdminUserResponseDto['role']) => (r === 'ADMIN' ? 0 : 1);
+
+  return [...users].sort((a, b) => {
+    const ra = rank(a.role);
+    const rb = rank(b.role);
+    if (ra !== rb) return ra - rb;
+
+    // 같은 role끼리는 userId로 정렬(원하면 userName으로 바꿔도 됨)
+    return a.userId.localeCompare(b.userId);
+  });
+}, [users]);
 
   if (loading) {
     return (
@@ -277,13 +307,6 @@ const AdminDashboard: React.FC = () => {
         </div>
       ) : (
         <div className="bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 overflow-hidden animate-fadeIn">
-          {/* role이 없어서 USER만 필터 불가 안내(원하면 제거) */}
-          {users.some(u => !u.role) && (
-            <div className="px-10 py-4 bg-amber-50 text-amber-800 text-xs font-bold border-b border-amber-100">
-              현재 AdminUserResponseDto에 role이 없어서 USER만 필터링할 수 없습니다. (DTO에 role 추가 또는 /admin/users/user-only API 추천)
-            </div>
-          )}
-
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
@@ -314,7 +337,7 @@ const AdminDashboard: React.FC = () => {
                           user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-600'
                         }`}
                       >
-                        {user.role ?? 'UNKNOWN'}
+                        {user.role}
                       </span>
                     </td>
                   </tr>

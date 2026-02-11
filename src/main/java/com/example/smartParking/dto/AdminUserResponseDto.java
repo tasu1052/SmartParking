@@ -1,6 +1,7 @@
 package com.example.smartParking.dto;
 
 
+import com.example.smartParking.entity.UserRole;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -12,4 +13,5 @@ public class AdminUserResponseDto {
     private Integer age;
     private String email;
     private String phoneNumber;
+    private UserRole role;
 }
